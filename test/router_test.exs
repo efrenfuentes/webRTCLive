@@ -4,7 +4,7 @@ defmodule WebRTCLive.RouterTest do
   import Plug.Conn
 
   test "serves demo, browser module, bundled Phoenix client, config and health" do
-    for path <- ["/", "/client.js", "/vendor/phoenix.mjs", "/health"] do
+    for path <- ["/", "/client.js", "/sdk.js", "/vendor/phoenix.mjs", "/health"] do
       conn = WebRTCLive.Endpoint.call(conn(:get, path), WebRTCLive.Endpoint.init([]))
       assert conn.status == 200, "#{path} returned #{conn.status}"
     end

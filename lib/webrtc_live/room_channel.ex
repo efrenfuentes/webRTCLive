@@ -4,12 +4,12 @@ defmodule WebRTCLive.RoomChannel do
 
   @impl true
   def join("room:" <> name, %{"role" => role}, socket)
-      when role in ["publisher", "listener"] do
+      when role in ["publisher", "listener", "participant"] do
     with true <- WebRTCLive.Access.valid_name?(name),
          {:ok, claims} <- WebRTCLive.Access.authorize(socket.assigns[:token], name, role),
          :ok <- WebRTCLive.Admission.acquire() do
       case join_authorized(name, role, claims.identity, socket) do
-        {:ok, _} = result ->
+        {:ok, _, _} = result ->
           result
 
         error ->
@@ -26,7 +26,12 @@ defmodule WebRTCLive.RoomChannel do
 
   defp join_authorized(name, role, identity, socket) do
     with {:ok, room} <- WebRTCLive.Room.get_or_start(name) do
-      role = if role == "publisher", do: :publisher, else: :listener
+      role =
+        case role do
+          "publisher" -> :publisher
+          "listener" -> :listener
+          "participant" -> :participant
+        end
 
       servers =
         Enum.map(Application.get_env(:webrtc_live, :ice_servers), fn server ->
@@ -47,11 +52,17 @@ defmodule WebRTCLive.RoomChannel do
           video_codecs: []
         )
 
-      track = MediaStreamTrack.new(:audio)
-      if role == :listener, do: PeerConnection.add_track(pc, track)
+      tracks =
+        for slot <- 0..(WebRTCLive.Room.capacity() - 1), into: %{} do
+          track = MediaStreamTrack.new(:audio)
+          # Only add_track-created senders can be associated with a remote offer.
+          # The inbound microphone transceiver is created from that offer itself.
+          if role != :publisher, do: PeerConnection.add_track(pc, track)
+          {slot, track.id}
+        end
 
-      case WebRTCLive.Room.join(room, role, %{pc: pc, track: track.id, identity: identity}) do
-        :ok ->
+      case WebRTCLive.Room.join(room, role, %{identity: identity}) do
+        {:ok, slot} ->
           Process.monitor(room)
 
           timer =
@@ -61,13 +72,18 @@ defmodule WebRTCLive.RoomChannel do
               Application.fetch_env!(:webrtc_live, :connect_timeout_ms)
             )
 
-          {:ok,
+          {:ok, %{identity: identity, slot: slot, capacity: WebRTCLive.Room.capacity()},
            assign(socket,
              pc: pc,
              room: room,
              role: role,
              identity: identity,
-             destination: nil,
+             slot: slot,
+             destinations: [],
+             sources: %{},
+             tracks: tracks,
+             continuity: %{},
+             muted: role == :listener,
              negotiated: false,
              connect_timer: timer,
              connected: false,
@@ -122,6 +138,13 @@ defmodule WebRTCLive.RoomChannel do
     end
   end
 
+  defp handle_signal("mute", %{"muted" => muted}, socket) when is_boolean(muted) do
+    case WebRTCLive.Room.mute(socket.assigns.room, muted) do
+      :ok -> {:reply, {:ok, %{}}, assign(socket, :muted, muted)}
+      {:error, reason} -> {:reply, {:error, %{reason: reason}}, socket}
+    end
+  end
+
   defp handle_signal(
          "ice",
          %{"candidate" => value, "sdpMid" => mid, "sdpMLineIndex" => index} = candidate,
@@ -140,13 +163,22 @@ defmodule WebRTCLive.RoomChannel do
   defp handle_signal(_, _, socket), do: {:reply, {:error, %{reason: "invalid_message"}}, socket}
 
   defp valid_offer?(sdp, role) do
-    expected = if role == :publisher, do: :sendonly, else: :recvonly
+    expected = [
+      if(role == :listener, do: :inactive, else: :sendonly)
+      | List.duplicate(
+          if(role == :publisher, do: :inactive, else: :recvonly),
+          WebRTCLive.Room.capacity()
+        )
+    ]
 
-    with {:ok, %{media: [%{type: :audio} = media]}} <- ExSDP.parse(sdp) do
-      directions =
-        Enum.filter(media.attributes, &(&1 in [:sendonly, :recvonly, :sendrecv, :inactive]))
-
-      directions == [expected] and media.port > 0
+    with {:ok, %{media: media}} <- ExSDP.parse(sdp),
+         true <- length(media) == length(expected) do
+      Enum.zip(media, expected)
+      |> Enum.all?(fn {media, direction} ->
+        media.type == :audio and media.port > 0 and
+          Enum.filter(media.attributes, &(&1 in [:sendonly, :recvonly, :sendrecv, :inactive])) ==
+            [direction]
+      end)
     else
       _ -> false
     end
@@ -173,11 +205,12 @@ defmodule WebRTCLive.RoomChannel do
 
   def handle_info(
         {:ex_webrtc, pc, {:rtp, _, _, packet}},
-        %{assigns: %{pc: pc, role: :publisher}} = socket
-      ) do
-    if destination = socket.assigns.destination do
-      PeerConnection.send_rtp(destination.pc, destination.track, packet)
-    end
+        %{assigns: %{pc: pc, role: role, muted: false}} = socket
+      )
+      when role != :listener do
+    Enum.each(socket.assigns.destinations, fn pid ->
+      send(pid, {:forward_audio, self(), socket.assigns.slot, packet})
+    end)
 
     {:noreply, socket}
   end
@@ -186,17 +219,36 @@ defmodule WebRTCLive.RoomChannel do
       when state in [:failed, :closed],
       do: {:stop, :normal, socket}
 
-  def handle_info({:destination, destination}, socket),
-    do: {:noreply, assign(socket, :destination, destination)}
+  def handle_info({:forward_audio, source, slot, packet}, socket) do
+    if socket.assigns.connected and Map.get(socket.assigns.sources, source) == slot do
+      {packet, state} =
+        WebRTCLive.AudioContinuity.rewrite(packet, source, socket.assigns.continuity[slot])
 
-  def handle_info({:members, roles}, socket) do
-    push(socket, "members", %{roles: roles})
-    {:noreply, socket}
+      PeerConnection.send_rtp(socket.assigns.pc, socket.assigns.tracks[slot], packet)
+      {:noreply, assign(socket, :continuity, Map.put(socket.assigns.continuity, slot, state))}
+    else
+      {:noreply, socket}
+    end
   end
 
-  def handle_info(:publisher_left, socket) do
-    push(socket, "ended", %{reason: "Publisher left. Join again for a new session."})
-    {:stop, :normal, socket}
+  def handle_info({:routing, peers}, socket) do
+    others = Enum.reject(peers, &(&1.pid == self()))
+    destinations = others |> Enum.reject(&(&1.role == :publisher)) |> Enum.map(& &1.pid)
+
+    sources =
+      if socket.assigns.role == :publisher,
+        do: %{},
+        else:
+          others
+          |> Enum.reject(&(&1.role == :listener or &1.muted))
+          |> Map.new(&{&1.pid, &1.slot})
+
+    push(socket, "participants", %{
+      participants: Enum.map(peers, &Map.take(&1, [:identity, :slot, :role, :muted]))
+    })
+
+    socket = assign(socket, destinations: destinations, sources: sources)
+    {:noreply, socket}
   end
 
   def handle_info({:DOWN, _, :process, room, _}, %{assigns: %{room: room}} = socket),

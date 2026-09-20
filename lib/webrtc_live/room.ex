@@ -1,5 +1,5 @@
 defmodule WebRTCLive.Room do
-  @moduledoc "An ephemeral audio relay room with one publisher and one listener."
+  @moduledoc "Ephemeral four-person audio room with stable receive slots."
   use GenServer, restart: :temporary
 
   def start_link(name), do: GenServer.start_link(__MODULE__, name, name: via(name))
@@ -21,6 +21,8 @@ defmodule WebRTCLive.Room do
   end
 
   def join(room, role, peer), do: GenServer.call(room, {:join, role, peer})
+  def mute(room, muted), do: GenServer.call(room, {:mute, muted})
+  def capacity, do: 4
 
   @impl true
   def init(_name), do: {:ok, %{}, 30_000}
@@ -28,40 +30,54 @@ defmodule WebRTCLive.Room do
   @impl true
   def handle_call({:join, role, peer}, {pid, _}, members) do
     cond do
-      Map.has_key?(members, role) ->
-        {:reply, {:error, :role_taken}, members}
-
-      peer[:identity] &&
-          Enum.any?(members, fn {_, member} -> member[:identity] == peer.identity end) ->
+      Enum.any?(members, fn {_, member} -> member.identity == peer.identity end) ->
         {:reply, {:error, :identity_taken}, members}
 
+      map_size(members) >= capacity() ->
+        {:reply, {:error, :room_full}, members}
+
       true ->
-        member = Map.merge(peer, %{pid: pid, monitor: Process.monitor(pid)})
-        members = Map.put(members, role, member)
+        used = Enum.map(members, fn {_, member} -> member.slot end)
+        slot = Enum.find(0..(capacity() - 1), &(&1 not in used))
 
-        if publisher = members[:publisher] do
-          send(publisher.pid, {:destination, members[:listener]})
-        end
+        member =
+          Map.merge(peer, %{
+            pid: pid,
+            monitor: Process.monitor(pid),
+            role: role,
+            slot: slot,
+            muted: role == :listener
+          })
 
-        Enum.each(members, fn {_, member} -> send(member.pid, {:members, Map.keys(members)}) end)
+        members = Map.put(members, pid, member)
+        broadcast(members)
+        {:reply, {:ok, slot}, members}
+    end
+  end
+
+  def handle_call({:mute, muted}, {pid, _}, members) when is_boolean(muted) do
+    case members[pid] do
+      %{role: role} when role != :listener ->
+        members = put_in(members[pid].muted, muted)
+        broadcast(members)
         {:reply, :ok, members}
+
+      _ ->
+        {:reply, {:error, :unauthorized}, members}
     end
   end
 
   @impl true
   def handle_info({:DOWN, ref, :process, _, _}, members) do
-    {departed, remaining} = Enum.split_with(members, fn {_, m} -> m.monitor == ref end)
-    members = Map.new(remaining)
-
-    if Keyword.has_key?(departed, :publisher) do
-      Enum.each(members, fn {_, m} -> send(m.pid, :publisher_left) end)
-    else
-      if publisher = members[:publisher], do: send(publisher.pid, {:destination, nil})
-    end
-
-    Enum.each(members, fn {_, m} -> send(m.pid, {:members, Map.keys(members)}) end)
+    members = Map.reject(members, fn {_, m} -> m.monitor == ref end)
+    broadcast(members)
     if map_size(members) == 0, do: {:stop, :normal, members}, else: {:noreply, members}
   end
 
   def handle_info(:timeout, members) when map_size(members) == 0, do: {:stop, :normal, members}
+
+  defp broadcast(members) do
+    peers = members |> Map.values() |> Enum.sort_by(& &1.slot)
+    Enum.each(peers, fn member -> send(member.pid, {:routing, peers}) end)
+  end
 end

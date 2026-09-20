@@ -15,6 +15,36 @@ defmodule WebRTCLive.RoomChannelTest do
     assert :error = connect(WebRTCLive.Socket, %{"token" => "forged"})
   end
 
+  test "participant negotiates one upload and four receive slots", %{room: room, topic: topic} do
+    alias ExWebRTC.{PeerConnection, MediaStreamTrack, SessionDescription}
+    {:ok, token} = WebRTCLive.Access.issue(room, "alice", "participant")
+    {:ok, socket} = connect(WebRTCLive.Socket, %{"token" => token})
+    {:ok, client} = PeerConnection.start_link()
+
+    {:ok, _} =
+      PeerConnection.add_transceiver(client, MediaStreamTrack.new(:audio), direction: :sendonly)
+
+    for _ <- 1..4, do: PeerConnection.add_transceiver(client, :audio, direction: :recvonly)
+    {:ok, offer} = PeerConnection.create_offer(client)
+    :ok = PeerConnection.set_local_description(client, offer)
+
+    {:ok, %{identity: "alice", capacity: 4}, joined} =
+      subscribe_and_join(socket, topic, %{role: "participant"})
+
+    ref = push(joined, "offer", SessionDescription.to_json(offer))
+    assert_reply(ref, :ok, %{"sdp" => answer}, 2000)
+    assert length(Regex.scan(~r/a=sendonly/, answer)) == 4
+    assert length(Regex.scan(~r/a=recvonly/, answer)) == 1
+
+    assert :ok =
+             PeerConnection.set_remote_description(client, %SessionDescription{
+               type: :answer,
+               sdp: answer
+             })
+
+    PeerConnection.stop(client)
+  end
+
   test "tokens cannot change room or permission", %{socket: socket, topic: topic} do
     assert {:error, %{reason: :unauthorized}} =
              subscribe_and_join(socket, topic, %{role: "listener"})
@@ -62,10 +92,10 @@ defmodule WebRTCLive.RoomChannelTest do
              subscribe_and_join(socket, "room:valid", %{role: "other"})
   end
 
-  test "rejects a second publisher and malformed signaling", %{socket: socket, topic: topic} do
+  test "rejects a duplicate identity and malformed signaling", %{socket: socket, topic: topic} do
     {:ok, _, joined} = subscribe_and_join(socket, topic, %{role: "publisher"})
 
-    assert {:error, %{reason: :role_taken}} =
+    assert {:error, %{reason: :identity_taken}} =
              subscribe_and_join(socket, topic, %{role: "publisher"})
 
     ref = push(joined, "ice", %{})
@@ -82,6 +112,8 @@ defmodule WebRTCLive.RoomChannelTest do
 
     {:ok, _} =
       PeerConnection.add_transceiver(client, MediaStreamTrack.new(:audio), direction: :sendonly)
+
+    for _ <- 1..4, do: PeerConnection.add_transceiver(client, :audio, direction: :inactive)
 
     {:ok, offer} = PeerConnection.create_offer(client)
     :ok = PeerConnection.set_local_description(client, offer)

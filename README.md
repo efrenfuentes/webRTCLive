@@ -1,7 +1,8 @@
 # WebRTCLive
 
-An Elixir WebRTC SFU prototype. The first milestone relays **Opus audio from one
-publisher to one listener** through the server. It is not LiveKit-protocol compatible.
+An Elixir WebRTC SFU prototype with **bidirectional Opus audio for up to four
+participants per room**, signed access grants, and a small TypeScript SDK.
+It is not LiveKit-protocol compatible.
 
 ## Run locally
 
@@ -11,27 +12,65 @@ mix deps.get
 mix phx.server
 ```
 
-Open <http://localhost:4000> in two browsers or tabs. Join as **Publish microphone**
-in one and **Listen** in the other, using the same room name. Allow microphone
-access and use headphones. Either role can join first. If autoplay is blocked,
-use the audio player's play button. The publisher can mute/unmute without
-renegotiation. Each room admits only one participant of each role. Use different
-participant identities. Leave the token field blank for automatic local demo tokens.
+Open <http://localhost:4000> in two to four browsers or tabs. Join as **Talk and listen**
+using the same room name and distinct identities. Allow microphone access and use
+headphones. If autoplay is blocked, use each participant's audio player. Mute state
+is visible to everyone. **Publish only** and **Listen only** remain available for
+restricted grants. Leave the token field blank for automatic local demo tokens.
 
-Leaving or closing a tab cleans up its peer connection. When a publisher leaves,
-the listener's session ends too; join again to start a new session. After a signaling
-failure, reconnect manually with Join. Empty rooms are removed automatically.
+Leaving or closing a tab cleans up that participant without interrupting others.
+Vacated slots can be reused immediately. After a signaling failure, reconnect
+manually with Join. Empty rooms are removed automatically.
 
 ## Architecture
 
 - Phoenix Channels negotiate SDP and exchange trickled ICE candidates.
 - `ex_webrtc` terminates ICE, DTLS and SRTP and handles Opus RTP transport.
 - A Registry and DynamicSupervisor own ephemeral room GenServers.
-- Rooms manage membership, monitor participants, and give the publisher its
-  destination. RTP is forwarded directly to the listener's peer connection,
-  without crossing the room process or Phoenix PubSub. There is no transcoding.
-- The demo uses native browser WebRTC and Phoenix's bundled JavaScript client;
-  no frontend build or CDN is required.
+- Rooms assign four stable slots, monitor participants, and distribute routing
+  snapshots. Participants forward RTP directly to other participants' channel
+  processes, where it is mapped to outgoing tracks; media does not cross the
+  room process or PubSub. There is no transcoding or self-audio forwarding.
+- One browser/server PeerConnection negotiates one microphone transceiver and
+  four receive transceivers. Inactive/self slots carry no audio. Membership changes
+  need no renegotiation; per-slot RTP sequence/timestamp translation maintains
+  continuity when a different source takes a vacated slot, including elapsed silence.
+- The demo imports the bundled TypeScript SDK from `/sdk.js`. The generated bundle
+  is checked in, so running the app needs neither Node nor a CDN.
+
+## Browser SDK
+
+`sdk/src/index.ts` exports `Room`, `JoinOptions`, `Participant`, `RemoteAudio`, and
+`Role`, and `RoomEvents`. The SDK owns microphone capture, signaling, ICE, media,
+and cleanup. `room.on(event, handler)` provides typed events and returns an unsubscribe
+function; standard `addEventListener` also works:
+
+```js
+import { Room } from "/sdk.js";
+const room = new Room();
+room.on("participants", (participants) => console.log(participants));
+room.on("tracks", () => {
+  // Reconcile your audio elements using participant.identity as the key.
+  for (const { participant, track } of room.remoteAudio) {
+    // audio.srcObject = new MediaStream([track]);
+  }
+});
+room.on("state", (state) => console.log(state));
+await room.join({ room: "demo", token, role: "participant" });
+await room.setMuted(true);
+room.leave();
+```
+
+`join()` resolves when SDP negotiation completes; the `state` event reports when
+media is connected. `remoteAudio` excludes the local participant and listen-only
+members. `participants` includes identities, slots, roles, and mute states. Handle
+autoplay permission in your UI. `leave()` stops captured microphone tracks and
+closes signaling and WebRTC, including when called during a pending join.
+Media disconnection ends the session; reconnect manually for now.
+
+To change the SDK: `npm ci`, edit `sdk/src/index.ts`, then `npm run build:sdk`.
+`npm run typecheck` checks its TypeScript API. The current protocol uses five
+ordered audio transceivers; old single-track relay clients must update.
 
 ## Checks
 
@@ -40,7 +79,7 @@ mix format --check-formatted
 mix test
 ```
 
-The optional browser test uses two isolated Chromium contexts with synthetic
+The optional browser test uses isolated Chromium contexts with synthetic
 microphone audio. With the server running in another terminal:
 
 ```sh
@@ -49,24 +88,26 @@ npm run test:browser
 ```
 
 Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`. This checks actual
-received RTP and decoded audio energy, playback, mute, duplicate admission,
-both join orders, leave/rejoin, and tab-close cleanup. Node is only needed for
-this optional test, not to run the app.
+received RTP and decoded audio energy in every direction for three/four participants,
+playback, mute, duplicate identities, fifth-participant rejection, slot reuse,
+leave/rejoin, tab-close cleanup, role restrictions, and room isolation. Node is
+needed only for SDK development and browser tests, not to run the app.
 
 ## Access and resource limits
 
 All WebSocket connections require a signed access token. A grant contains a room,
-participant identity, and role (`publisher` or `listener`). The signature and
+participant identity, and role (`participant`, `publisher`, or `listener`). The signature and
 five-minute lifetime are checked on connect and again on room join. Expiry limits
 admission, not the duration of an established call. Tokens are bearer credentials
 and can be reused within that window; they are not single-use or revocable yet.
-The same identity cannot occupy both roles in a room.
+An identity can have only one active session in a room. `participant` can publish
+and subscribe; `publisher` can only publish; `listener` can only subscribe.
 
 These are Phoenix signed tokens, **not JWTs or LiveKit-compatible tokens**. Issue
 them from trusted Elixir application code after authenticating your own users:
 
 ```elixir
-{:ok, token} = WebRTCLive.Access.issue("demo", "alice", "publisher")
+{:ok, token} = WebRTCLive.Access.issue("demo", "alice", "participant")
 ```
 
 For local manual testing, `iex -S mix phx.server` starts a server with an interactive
@@ -81,7 +122,7 @@ from proxy access logs. Phoenix filters token parameters from its own logs.
 Defaults in `config/config.exs`:
 
 - 100 rooms and 200 reserved/active media sessions per node.
-- One publisher, one listener, and one directional audio track per participant.
+- Four participants per room, with one microphone and up to three remote speakers each.
 - A 30-second deadline to establish the media connection.
 - 100 signaling messages per participant per 10-second window; excess closes the session.
 - 128 KiB WebSocket frames, SDP below 64 KiB, and ICE candidate strings below 4 KiB.
@@ -112,8 +153,7 @@ This is a local development milestone, **not ready for public deployment**.
 Signed admission and application resource limits are implemented. User account
 authentication, token revocation, per-account quotas, HTTP/connection rate limiting,
 and cross-network TURN testing remain. Rooms and calls are lost on restart.
-It does not implement video, bidirectional conferencing, automatic reconnect,
+It does not implement video, automatic reconnect,
 recording, simulcast, congestion adaptation, or the LiveKit SDK protocol.
 
-Next: bidirectional audio with 2–4 participants and a TypeScript SDK; then video, TURN verification
-across networks, and deployment hardening.
+Next: video, TURN verification across networks, and deployment hardening.

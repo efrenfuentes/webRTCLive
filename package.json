@@ -2,6 +2,16 @@
   "name": "webrtc-live-browser-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test:browser": "node test/browser/audio-relay.mjs" },
-  "devDependencies": { "playwright": "1.63.0" }
+  "scripts": {
+    "build:sdk": "tsc -p sdk && esbuild sdk/src/index.ts --bundle --format=esm --minify --outfile=priv/static/sdk.js",
+    "typecheck": "tsc -p sdk",
+    "test:browser": "node test/browser/audio-room.mjs"
+  },
+  "devDependencies": {
+    "@types/phoenix": "^1.6.7",
+    "esbuild": "^0.28.2",
+    "phoenix": "^1.8.14",
+    "playwright": "1.63.0",
+    "typescript": "^7.0.2"
+  }
 }

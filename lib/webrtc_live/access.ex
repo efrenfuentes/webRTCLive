@@ -4,7 +4,8 @@ defmodule WebRTCLive.Access do
   @max_age 300
 
   def issue(room, identity, role) do
-    if valid_name?(room) and valid_name?(identity) and role in ["publisher", "listener"] do
+    if valid_name?(room) and valid_name?(identity) and
+         role in ["publisher", "listener", "participant"] do
       {:ok,
        Phoenix.Token.sign(WebRTCLive.Endpoint, @salt, %{
          room: room,
@@ -19,7 +20,9 @@ defmodule WebRTCLive.Access do
   def verify(token) when is_binary(token) and byte_size(token) <= 4096 do
     with {:ok, %{room: room, identity: identity, role: role} = claims} <-
            Phoenix.Token.verify(WebRTCLive.Endpoint, @salt, token, max_age: @max_age),
-         true <- valid_name?(room) and valid_name?(identity) and role in ["publisher", "listener"] do
+         true <-
+           valid_name?(room) and valid_name?(identity) and
+             role in ["publisher", "listener", "participant"] do
       {:ok, claims}
     else
       _ -> {:error, :unauthorized}
