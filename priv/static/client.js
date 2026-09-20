@@ -2,6 +2,7 @@ import { Socket } from "/vendor/phoenix.mjs";
 
 const $ = (id) => document.getElementById(id);
 let session = null;
+$("identity").value = `guest-${crypto.randomUUID().slice(0, 8)}`;
 
 function status(text) { $("status").textContent = text; }
 function push(channel, event, payload) {
@@ -25,6 +26,7 @@ function leave(message = "Disconnected.") {
   $("join").disabled = false;
   $("room").disabled = false;
   $("role").disabled = false;
+  $("identity").disabled = $("token").disabled = false;
   $("leave").disabled = true;
   $("mute").disabled = true;
   $("mute").textContent = "Mute microphone";
@@ -40,20 +42,32 @@ $("join-form").addEventListener("submit", async (event) => {
   const active = () => session === current;
   const role = $("role").value;
   const room = $("room").value;
+  const identity = $("identity").value;
   $("join").disabled = $("room").disabled = $("role").disabled = true;
+  $("identity").disabled = $("token").disabled = true;
   $("leave").disabled = false;
   status("Connecting…");
   try {
+    let token = $("token").value.trim();
+    if (!token) {
+      const grant = await fetch("/dev/token", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room, identity, role }),
+      });
+      if (!grant.ok) throw new Error("Provide a valid access token; local demo access is unavailable.");
+      ({ token } = await grant.json());
+    }
+    if (!active()) return;
+    const response = await fetch("/config", { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) throw new Error("Access token is invalid or expired.");
+    const config = await response.json();
+    if (!active()) return;
     if (role === "publisher") {
       if (!navigator.mediaDevices) throw new Error("Microphone access requires HTTPS or localhost.");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       if (!active()) { stream.getTracks().forEach((track) => track.stop()); return; }
       current.stream = stream;
     }
-    const response = await fetch("/config");
-    if (!response.ok) throw new Error("Could not load connection settings");
-    const config = await response.json();
-    if (!active()) return;
     const pc = current.pc = new RTCPeerConnection(config);
     if (current.stream) {
       pc.addTransceiver(current.stream.getAudioTracks()[0], { direction: "sendonly", streams: [current.stream] });
@@ -72,7 +86,7 @@ $("join-form").addEventListener("submit", async (event) => {
       if (pc.connectionState === "failed") return leave("Media connection failed. Check network/TURN settings, then join again.");
       status(`Media: ${pc.connectionState}. ${role === "publisher" ? "Publishing microphone." : "Waiting for publisher audio."}`);
     };
-    const socket = current.socket = new Socket("/socket");
+    const socket = current.socket = new Socket("/socket", { params: { token } });
     socket.onError(() => { if (active()) leave("Signaling connection lost. Join again."); });
     socket.onClose(() => { if (active()) leave("Signaling connection closed. Join again."); });
     socket.connect();

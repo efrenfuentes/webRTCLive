@@ -56,6 +56,14 @@ defmodule WebRTCLive.RoomTest do
     GenServer.stop(room)
   end
 
+  test "room cap rejects new rooms but permits joining an existing room" do
+    supervisor = start_supervised!({DynamicSupervisor, strategy: :one_for_one, max_children: 1})
+    name = "limited-#{System.unique_integer([:positive])}"
+    assert {:ok, room} = Room.get_or_start(name, supervisor)
+    assert {:ok, ^room} = Room.get_or_start(name, supervisor)
+    assert {:error, :max_children} = Room.get_or_start(name <> "-extra", supervisor)
+  end
+
   defp assert_registry_empty(name, attempts) do
     case Registry.lookup(WebRTCLive.Registry, name) do
       [] ->

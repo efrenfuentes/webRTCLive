@@ -15,7 +15,8 @@ Open <http://localhost:4000> in two browsers or tabs. Join as **Publish micropho
 in one and **Listen** in the other, using the same room name. Allow microphone
 access and use headphones. Either role can join first. If autoplay is blocked,
 use the audio player's play button. The publisher can mute/unmute without
-renegotiation. Each room admits only one participant of each role.
+renegotiation. Each room admits only one participant of each role. Use different
+participant identities. Leave the token field blank for automatic local demo tokens.
 
 Leaving or closing a tab cleans up its peer connection. When a publisher leaves,
 the listener's session ends too; join again to start a new session. After a signaling
@@ -52,6 +53,43 @@ received RTP and decoded audio energy, playback, mute, duplicate admission,
 both join orders, leave/rejoin, and tab-close cleanup. Node is only needed for
 this optional test, not to run the app.
 
+## Access and resource limits
+
+All WebSocket connections require a signed access token. A grant contains a room,
+participant identity, and role (`publisher` or `listener`). The signature and
+five-minute lifetime are checked on connect and again on room join. Expiry limits
+admission, not the duration of an established call. Tokens are bearer credentials
+and can be reused within that window; they are not single-use or revocable yet.
+The same identity cannot occupy both roles in a room.
+
+These are Phoenix signed tokens, **not JWTs or LiveKit-compatible tokens**. Issue
+them from trusted Elixir application code after authenticating your own users:
+
+```elixir
+{:ok, token} = WebRTCLive.Access.issue("demo", "alice", "publisher")
+```
+
+For local manual testing, `iex -S mix phx.server` starts a server with an interactive
+shell where you can run that expression. Paste its token into the demo. The signed
+identity is authoritative; the Identity field is used only when requesting a demo token.
+`POST /dev/token` issues unrestricted demo grants only in development; it returns
+404 in test and production. There is no public production token-minting endpoint.
+`GET /config` also requires a bearer token to protect TURN credentials and sends
+`Cache-Control: no-store`. Use HTTPS and redact WebSocket token query parameters
+from proxy access logs. Phoenix filters token parameters from its own logs.
+
+Defaults in `config/config.exs`:
+
+- 100 rooms and 200 reserved/active media sessions per node.
+- One publisher, one listener, and one directional audio track per participant.
+- A 30-second deadline to establish the media connection.
+- 100 signaling messages per participant per 10-second window; excess closes the session.
+- 128 KiB WebSocket frames, SDP below 64 KiB, and ICE candidate strings below 4 KiB.
+
+Reservations are atomic and released when the channel exits, including crashes.
+Supervisor restarts also tear down dependent sessions to keep limits consistent.
+These are initial application limits, not comprehensive network abuse protection.
+
 ## Network configuration
 
 Development binds to loopback on port 4000 with no external ICE servers.
@@ -71,11 +109,11 @@ are required, with HTTPS terminated at a reverse proxy. `PORT` defaults to 4000.
 ## Scope and next steps
 
 This is a local development milestone, **not ready for public deployment**.
-Room names are not authentication: there are no signed access tokens, authorization,
-quotas, rate limits, or room-count limits yet. Rooms and calls are lost on restart.
+Signed admission and application resource limits are implemented. User account
+authentication, token revocation, per-account quotas, HTTP/connection rate limiting,
+and cross-network TURN testing remain. Rooms and calls are lost on restart.
 It does not implement video, bidirectional conferencing, automatic reconnect,
 recording, simulcast, congestion adaptation, or the LiveKit SDK protocol.
 
-Next: signed room/identity/permission tokens and resource limits; bidirectional
-audio with 2–4 participants and a TypeScript SDK; then video, TURN verification
+Next: bidirectional audio with 2–4 participants and a TypeScript SDK; then video, TURN verification
 across networks, and deployment hardening.

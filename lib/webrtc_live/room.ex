@@ -5,8 +5,15 @@ defmodule WebRTCLive.Room do
   def start_link(name), do: GenServer.start_link(__MODULE__, name, name: via(name))
   defp via(name), do: {:via, Registry, {WebRTCLive.Registry, name}}
 
-  def get_or_start(name) do
-    case DynamicSupervisor.start_child(WebRTCLive.RoomSupervisor, {__MODULE__, name}) do
+  def get_or_start(name, supervisor \\ WebRTCLive.RoomSupervisor) do
+    case Registry.lookup(WebRTCLive.Registry, name) do
+      [{pid, _}] -> {:ok, pid}
+      [] -> start_room(name, supervisor)
+    end
+  end
+
+  defp start_room(name, supervisor) do
+    case DynamicSupervisor.start_child(supervisor, {__MODULE__, name}) do
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
       error -> error
@@ -20,18 +27,24 @@ defmodule WebRTCLive.Room do
 
   @impl true
   def handle_call({:join, role, peer}, {pid, _}, members) do
-    if Map.has_key?(members, role) do
-      {:reply, {:error, :role_taken}, members}
-    else
-      member = Map.merge(peer, %{pid: pid, monitor: Process.monitor(pid)})
-      members = Map.put(members, role, member)
+    cond do
+      Map.has_key?(members, role) ->
+        {:reply, {:error, :role_taken}, members}
 
-      if publisher = members[:publisher] do
-        send(publisher.pid, {:destination, members[:listener]})
-      end
+      peer[:identity] &&
+          Enum.any?(members, fn {_, member} -> member[:identity] == peer.identity end) ->
+        {:reply, {:error, :identity_taken}, members}
 
-      Enum.each(members, fn {_, member} -> send(member.pid, {:members, Map.keys(members)}) end)
-      {:reply, :ok, members}
+      true ->
+        member = Map.merge(peer, %{pid: pid, monitor: Process.monitor(pid)})
+        members = Map.put(members, role, member)
+
+        if publisher = members[:publisher] do
+          send(publisher.pid, {:destination, members[:listener]})
+        end
+
+        Enum.each(members, fn {_, member} -> send(member.pid, {:members, Map.keys(members)}) end)
+        {:reply, :ok, members}
     end
   end
 

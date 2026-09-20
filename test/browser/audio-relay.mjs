@@ -47,6 +47,17 @@ try {
   const room = `browser-${Date.now()}`;
   const publisher = await page("publisher", room);
   const listener = await page("listener", room);
+  assert.equal((await listener.request.get(`${baseURL}/config`)).status(), 401);
+  const denied = await page("listener", room);
+  const grant = await denied.request.post(`${baseURL}/dev/token`, {
+    data: { room, identity: "wrong-role", role: "publisher" },
+  });
+  assert.equal(grant.status(), 200);
+  await denied.locator("#token").fill((await grant.json()).token);
+  await denied.locator("#join").click();
+  await denied.waitForFunction(() => document.querySelector("#status").textContent.includes("unauthorized"));
+  await denied.close();
+  console.log("PASS: ICE config protected and token role enforced in the browser.");
   await join(listener); // Listener-first admission must work.
   await join(publisher);
   await audioReceived(listener);

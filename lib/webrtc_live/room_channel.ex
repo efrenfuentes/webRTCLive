@@ -5,7 +5,27 @@ defmodule WebRTCLive.RoomChannel do
   @impl true
   def join("room:" <> name, %{"role" => role}, socket)
       when role in ["publisher", "listener"] do
-    if Regex.match?(~r/\A[a-zA-Z0-9_-]{1,64}\z/, name) do
+    with true <- WebRTCLive.Access.valid_name?(name),
+         {:ok, claims} <- WebRTCLive.Access.authorize(socket.assigns[:token], name, role),
+         :ok <- WebRTCLive.Admission.acquire() do
+      case join_authorized(name, role, claims.identity, socket) do
+        {:ok, _} = result ->
+          result
+
+        error ->
+          WebRTCLive.Admission.release()
+          error
+      end
+    else
+      false -> {:error, %{reason: "invalid_room"}}
+      {:error, reason} -> {:error, %{reason: reason}}
+    end
+  end
+
+  def join(_, _, _), do: {:error, %{reason: "invalid_role"}}
+
+  defp join_authorized(name, role, identity, socket) do
+    with {:ok, room} <- WebRTCLive.Room.get_or_start(name) do
       role = if role == "publisher", do: :publisher, else: :listener
 
       servers =
@@ -29,32 +49,69 @@ defmodule WebRTCLive.RoomChannel do
 
       track = MediaStreamTrack.new(:audio)
       if role == :listener, do: PeerConnection.add_track(pc, track)
-      {:ok, room} = WebRTCLive.Room.get_or_start(name)
 
-      case WebRTCLive.Room.join(room, role, %{pc: pc, track: track.id}) do
+      case WebRTCLive.Room.join(room, role, %{pc: pc, track: track.id, identity: identity}) do
         :ok ->
           Process.monitor(room)
 
+          timer =
+            Process.send_after(
+              self(),
+              :connect_timeout,
+              Application.fetch_env!(:webrtc_live, :connect_timeout_ms)
+            )
+
           {:ok,
-           assign(socket, pc: pc, room: room, role: role, destination: nil, negotiated: false)}
+           assign(socket,
+             pc: pc,
+             room: room,
+             role: role,
+             identity: identity,
+             destination: nil,
+             negotiated: false,
+             connect_timer: timer,
+             connected: false,
+             signal_window: System.monotonic_time(:millisecond),
+             signal_count: 0
+           )}
 
         {:error, reason} ->
           PeerConnection.stop(pc)
           {:error, %{reason: reason}}
       end
     else
-      {:error, %{reason: "invalid_room"}}
+      {:error, :max_children} -> {:error, %{reason: :capacity_reached}}
+      {:error, _} -> {:error, %{reason: :room_unavailable}}
     end
   end
 
-  def join(_, _, _), do: {:error, %{reason: "invalid_role"}}
-
   @impl true
-  def handle_in("offer", %{"type" => "offer", "sdp" => sdp}, socket)
-      when is_binary(sdp) and byte_size(sdp) < 65_536 do
+  def handle_in(event, payload, socket) do
+    now = System.monotonic_time(:millisecond)
+
+    socket =
+      if now - socket.assigns.signal_window >= 10_000,
+        do: assign(socket, signal_window: now, signal_count: 0),
+        else: socket
+
+    if socket.assigns.signal_count >= 100 do
+      push(socket, "ended", %{reason: "Signaling rate limit exceeded."})
+      {:stop, :normal, socket}
+    else
+      handle_signal(
+        event,
+        payload,
+        assign(socket, :signal_count, socket.assigns.signal_count + 1)
+      )
+    end
+  end
+
+  defp handle_signal("offer", %{"type" => "offer", "sdp" => sdp}, socket)
+       when is_binary(sdp) and byte_size(sdp) < 65_536 do
     pc = socket.assigns.pc
 
     with false <- socket.assigns.negotiated,
+         true <- valid_offer?(sdp, socket.assigns.role),
          :ok <-
            PeerConnection.set_remote_description(pc, %SessionDescription{type: :offer, sdp: sdp}),
          {:ok, answer} <- PeerConnection.create_answer(pc),
@@ -65,13 +122,13 @@ defmodule WebRTCLive.RoomChannel do
     end
   end
 
-  def handle_in(
-        "ice",
-        %{"candidate" => value, "sdpMid" => mid, "sdpMLineIndex" => index} = candidate,
-        socket
-      )
-      when is_binary(value) and byte_size(value) < 4096 and (is_binary(mid) or is_nil(mid)) and
-             (is_integer(index) or is_nil(index)) do
+  defp handle_signal(
+         "ice",
+         %{"candidate" => value, "sdpMid" => mid, "sdpMLineIndex" => index} = candidate,
+         socket
+       )
+       when is_binary(value) and byte_size(value) < 4096 and (is_binary(mid) or is_nil(mid)) and
+              (is_integer(index) or is_nil(index)) do
     with :ok <-
            PeerConnection.add_ice_candidate(socket.assigns.pc, ICECandidate.from_json(candidate)) do
       {:noreply, socket}
@@ -80,9 +137,35 @@ defmodule WebRTCLive.RoomChannel do
     end
   end
 
-  def handle_in(_, _, socket), do: {:reply, {:error, %{reason: "invalid_message"}}, socket}
+  defp handle_signal(_, _, socket), do: {:reply, {:error, %{reason: "invalid_message"}}, socket}
+
+  defp valid_offer?(sdp, role) do
+    expected = if role == :publisher, do: :sendonly, else: :recvonly
+
+    with {:ok, %{media: [%{type: :audio} = media]}} <- ExSDP.parse(sdp) do
+      directions =
+        Enum.filter(media.attributes, &(&1 in [:sendonly, :recvonly, :sendrecv, :inactive]))
+
+      directions == [expected] and media.port > 0
+    else
+      _ -> false
+    end
+  end
 
   @impl true
+  def handle_info(:connect_timeout, %{assigns: %{connected: false}} = socket) do
+    push(socket, "ended", %{reason: "Media connection timed out."})
+    {:stop, :normal, socket}
+  end
+
+  def handle_info(
+        {:ex_webrtc, pc, {:connection_state_change, :connected}},
+        %{assigns: %{pc: pc}} = socket
+      ) do
+    Process.cancel_timer(socket.assigns.connect_timer)
+    {:noreply, assign(socket, :connected, true)}
+  end
+
   def handle_info({:ex_webrtc, pc, {:ice_candidate, candidate}}, %{assigns: %{pc: pc}} = socket) do
     push(socket, "ice", ICECandidate.to_json(candidate))
     {:noreply, socket}
@@ -99,8 +182,9 @@ defmodule WebRTCLive.RoomChannel do
     {:noreply, socket}
   end
 
-  def handle_info({:ex_webrtc, _, {:connection_state_change, :failed}}, socket),
-    do: {:stop, :normal, socket}
+  def handle_info({:ex_webrtc, _, {:connection_state_change, state}}, socket)
+      when state in [:failed, :closed],
+      do: {:stop, :normal, socket}
 
   def handle_info({:destination, destination}, socket),
     do: {:noreply, assign(socket, :destination, destination)}
@@ -122,6 +206,7 @@ defmodule WebRTCLive.RoomChannel do
 
   @impl true
   def terminate(_, socket) do
+    if timer = socket.assigns[:connect_timer], do: Process.cancel_timer(timer)
     if pc = socket.assigns[:pc], do: PeerConnection.stop(pc)
     :ok
   end

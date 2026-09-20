@@ -4,8 +4,54 @@ defmodule WebRTCLive.RoomChannelTest do
   @endpoint WebRTCLive.Endpoint
 
   setup do
-    {:ok, socket} = connect(WebRTCLive.Socket, %{})
-    %{socket: socket, topic: "room:test-#{System.unique_integer([:positive])}"}
+    room = "test-#{System.unique_integer([:positive])}"
+    {:ok, token} = WebRTCLive.Access.issue(room, "alice", "publisher")
+    {:ok, socket} = connect(WebRTCLive.Socket, %{"token" => token})
+    %{socket: socket, topic: "room:#{room}", room: room}
+  end
+
+  test "socket requires a signed token" do
+    assert :error = connect(WebRTCLive.Socket, %{})
+    assert :error = connect(WebRTCLive.Socket, %{"token" => "forged"})
+  end
+
+  test "tokens cannot change room or permission", %{socket: socket, topic: topic} do
+    assert {:error, %{reason: :unauthorized}} =
+             subscribe_and_join(socket, topic, %{role: "listener"})
+
+    assert {:error, %{reason: :unauthorized}} =
+             subscribe_and_join(socket, "room:other", %{role: "publisher"})
+  end
+
+  test "participant identities must be unique in a room", %{
+    socket: socket,
+    topic: topic,
+    room: room
+  } do
+    {:ok, _, _} = subscribe_and_join(socket, topic, %{role: "publisher"})
+    {:ok, token} = WebRTCLive.Access.issue(room, "alice", "listener")
+    {:ok, listener} = connect(WebRTCLive.Socket, %{"token" => token})
+
+    assert {:error, %{reason: :identity_taken}} =
+             subscribe_and_join(listener, topic, %{role: "listener"})
+  end
+
+  test "signaling flood closes the session", %{socket: socket, topic: topic} do
+    {:ok, _, joined} = subscribe_and_join(socket, topic, %{role: "publisher"})
+    Process.unlink(joined.channel_pid)
+    monitor = Process.monitor(joined.channel_pid)
+    for _ <- 1..101, do: push(joined, "unknown", %{})
+    assert_push("ended", %{reason: "Signaling rate limit exceeded."})
+    assert_receive {:DOWN, ^monitor, :process, _, _}, 2000
+  end
+
+  test "unconnected sessions expire", %{socket: socket, topic: topic} do
+    {:ok, _, joined} = subscribe_and_join(socket, topic, %{role: "publisher"})
+    Process.unlink(joined.channel_pid)
+    monitor = Process.monitor(joined.assigns.pc)
+    send(joined.channel_pid, :connect_timeout)
+    assert_push("ended", %{reason: "Media connection timed out."})
+    assert_receive {:DOWN, ^monitor, :process, _, _}, 2000
   end
 
   test "validates room names and roles", %{socket: socket} do
@@ -41,6 +87,10 @@ defmodule WebRTCLive.RoomChannelTest do
     :ok = PeerConnection.set_local_description(client, offer)
     {:ok, _, joined} = subscribe_and_join(socket, topic, %{role: "publisher"})
     server = joined.assigns.pc
+    # A publish grant must not negotiate receive or bidirectional media.
+    invalid = %{offer | sdp: String.replace(offer.sdp, "a=sendonly", "a=sendrecv")}
+    ref = push(joined, "offer", SessionDescription.to_json(invalid))
+    assert_reply(ref, :error, %{reason: "invalid_offer"})
     ref = push(joined, "offer", SessionDescription.to_json(offer))
     assert_reply(ref, :ok, %{"type" => "answer", "sdp" => sdp}, 2000)
     assert sdp =~ "opus/48000/2"

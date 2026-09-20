@@ -6,10 +6,14 @@ defmodule WebRTCLive.Application do
       [
         {Phoenix.PubSub, name: WebRTCLive.PubSub},
         {Registry, keys: :unique, name: WebRTCLive.Registry},
-        {DynamicSupervisor, strategy: :one_for_one, name: WebRTCLive.RoomSupervisor},
+        {WebRTCLive.Admission, limit: Application.fetch_env!(:webrtc_live, :max_sessions)},
+        {DynamicSupervisor,
+         strategy: :one_for_one,
+         name: WebRTCLive.RoomSupervisor,
+         max_children: Application.fetch_env!(:webrtc_live, :max_rooms)},
         WebRTCLive.Endpoint
       ],
-      strategy: :one_for_one,
+      strategy: :rest_for_one,
       name: WebRTCLive.Supervisor
     )
   end
