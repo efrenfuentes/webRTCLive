@@ -1,0 +1,7 @@
+{
+  "name": "webrtc-live-browser-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test:browser": "node test/browser/audio-relay.mjs" },
+  "devDependencies": { "playwright": "1.63.0" }
+}
