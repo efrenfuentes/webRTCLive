@@ -1,0 +1,7 @@
+.git
+.env
+deps
+_build
+node_modules
+test
+erl_crash.dump

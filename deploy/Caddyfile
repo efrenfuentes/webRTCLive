@@ -1,0 +1,4 @@
+{$HOST} {
+    # No access logs: WebSocket query strings contain admission tokens.
+    reverse_proxy 127.0.0.1:4000
+}

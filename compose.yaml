@@ -1,0 +1,35 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    environment:
+      RELEASE_DISTRIBUTION: name
+      RELEASE_NODE: webrtc_live@127.0.0.1
+      ERL_AFLAGS: -kernel inet_dist_use_interface {127,0,0,1}
+      ERL_EPMD_ADDRESS: 127.0.0.1
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      HOST: ${HOST:?Set HOST in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  caddy_data:
+  caddy_config:

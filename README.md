@@ -145,11 +145,14 @@ ICE_SERVERS_JSON='[{"urls":"stun:stun.example.com:3478"},{"urls":"turn:turn.exam
 
 These credentials are exposed to the browser by `/config`; use temporary,
 restricted TURN credentials. For production mode, `HOST` and `SECRET_KEY_BASE`
-are required, with HTTPS terminated at a reverse proxy. `PORT` defaults to 4000.
+and `PUBLIC_IP` are required, with HTTPS terminated at a reverse proxy. `PORT`
+defaults to 4000, bound to loopback. Production ICE uses UDP 50000–50100 and
+advertises only `PUBLIC_IP`. See the deployment guide for Linux host networking.
 
 ## Scope and next steps
 
-This is a local development milestone, **not ready for public deployment**.
+This is an experimental milestone, **not ready for unrestricted public use**.
+See [Droplet deployment](deploy/README.md) for the limited-access HTTPS setup.
 Signed admission and application resource limits are implemented. User account
 authentication, token revocation, per-account quotas, HTTP/connection rate limiting,
 and cross-network TURN testing remain. Rooms and calls are lost on restart.

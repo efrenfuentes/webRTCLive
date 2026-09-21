@@ -41,6 +41,11 @@ defmodule WebRTCLive.RoomChannel do
       {:ok, pc} =
         PeerConnection.start_link(
           ice_servers: servers,
+          ice_port_range: Application.get_env(:webrtc_live, :ice_port_range, [0]),
+          ice_ip_filter: fn ip ->
+            public_ip = Application.get_env(:webrtc_live, :public_ip)
+            is_nil(public_ip) or ip == public_ip
+          end,
           audio_codecs: [
             %ExWebRTC.RTPCodecParameters{
               payload_type: 111,
