@@ -161,4 +161,6 @@ recording, simulcast, congestion adaptation, or the LiveKit SDK protocol.
 
 The Droplet setup now includes authenticated TURN over UDP/TCP; see the
 deployment guide for relay-only smoke tests and limitations.
-Next: load testing, TURN TLS/443, video, and deployment hardening.
+Initial [load-test results](test/browser/LOAD_RESULTS_2026-09-21.md) support keeping
+the five-room deployment cap; longer capacity validation remains.
+Next: soak testing, TURN TLS/443, video, and deployment hardening.

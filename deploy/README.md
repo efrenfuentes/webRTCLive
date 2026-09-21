@@ -75,7 +75,11 @@ These tests force relay-only ICE, verify the selected candidate and transport,
 and require decoded audio in both directions. Omit TURN_TRANSPORT for the
 normal connection test. Use additional real networks before wider use.
 
-No load testing has been performed. Account authentication, token revocation,
+Initial short load tests passed at five four-person rooms over direct audio
+and TURN UDP/TCP. Ten direct rooms hit the server/generator CPU safety stop;
+the production limit remains five rooms. See the
+[results and limitations](../test/browser/LOAD_RESULTS_2026-09-21.md).
+Long-duration capacity validation remains. Account authentication, token revocation,
 and network abuse protection remain incomplete. Monitor CPU, memory, bandwidth,
 and DigitalOcean billing. Stopping the server does not stop Droplet billing;
 delete it when no longer needed. Transfer overages may add to the base price.

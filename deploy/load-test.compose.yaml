@@ -1,0 +1,7 @@
+# TEMPORARY direct-media capacity test only. Restore plain compose.yaml after use.
+# TURN allocation limits remain unchanged; do not use this to raise production capacity.
+services:
+  app:
+    environment:
+      MAX_ROOMS: '10'
+      MAX_SESSIONS: '40'
