@@ -7,4 +7,6 @@ if [ -e .env ]; then
 fi
 umask 077
 secret=$(openssl rand -hex 64)
-sed "s/replace-with-a-random-secret/$secret/" .env.example > .env
+turn_secret=$(openssl rand -hex 32)
+sed -e "s/replace-with-a-random-secret/$secret/" \
+    -e "s/replace-with-a-random-turn-secret/$turn_secret/" .env.example > .env

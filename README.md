@@ -159,4 +159,6 @@ and cross-network TURN testing remain. Rooms and calls are lost on restart.
 It does not implement video, automatic reconnect,
 recording, simulcast, congestion adaptation, or the LiveKit SDK protocol.
 
-Next: video, TURN verification across networks, and deployment hardening.
+The Droplet setup now includes authenticated TURN over UDP/TCP; see the
+deployment guide for relay-only smoke tests and limitations.
+Next: load testing, TURN TLS/443, video, and deployment hardening.

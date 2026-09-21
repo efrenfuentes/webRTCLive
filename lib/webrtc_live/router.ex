@@ -16,8 +16,8 @@ defmodule WebRTCLive.Router do
 
   get "/config" do
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, _} <- WebRTCLive.Access.verify(token) do
-      json(conn, 200, %{iceServers: Application.get_env(:webrtc_live, :ice_servers)})
+         {:ok, claims} <- WebRTCLive.Access.verify(token) do
+      json(conn, 200, WebRTCLive.IceConfig.for_identity(claims.identity))
     else
       _ -> json(conn, 401, %{error: "unauthorized"})
     end

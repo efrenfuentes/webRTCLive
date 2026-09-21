@@ -22,3 +22,17 @@ end
 if servers = System.get_env("ICE_SERVERS_JSON") do
   config :webrtc_live, :ice_servers, Jason.decode!(servers)
 end
+
+if secret = System.get_env("TURN_SECRET") do
+  if byte_size(secret) < 32 or String.starts_with?(secret, "replace-") do
+    raise "TURN_SECRET must be a randomly generated secret of at least 32 bytes"
+  end
+
+  turn_host = System.get_env("TURN_HOST") || System.fetch_env!("HOST")
+
+  config :webrtc_live, :turn, %{
+    secret: secret,
+    ttl: 86_400,
+    urls: ["turn:#{turn_host}:3478?transport=udp", "turn:#{turn_host}:3478?transport=tcp"]
+  }
+end

@@ -6,10 +6,11 @@ limits are five rooms and twenty sessions; these are not measured capacity.
 
 1. Point the hostname's DNS A record directly at the server (no HTTP proxy).
 2. Install Docker Engine and Compose. Allow TCP 22, 80, 443 and UDP
-   50000–50100 in the firewall. Do not expose 4000 or Erlang distribution ports.
+   50000–50100 in the firewall. TURN also needs TCP/UDP 3478 and UDP
+   49160–49200. Do not expose 4000 or Erlang distribution ports.
 3. Copy this repository to `/opt/webrtc-live`.
-4. Copy `.env.example` to `.env`, set the hostname and public IPv4 address,
-   and replace `SECRET_KEY_BASE` with `openssl rand -hex 64`. Keep `.env`
+4. Run `sh deploy/init-env.sh`, then set the hostname and public IPv4 address
+   in `.env`. This generates separate signing and TURN secrets. Keep `.env`
    private (`chmod 600 .env`) and never commit it.
 5. Run `docker compose up -d --build`. Linux host networking allows ICE to
    advertise the server's real public address. HTTP binds only to loopback.
@@ -42,8 +43,38 @@ BASE_URL=https://webrtc.efrenfuentes.net DEPLOY_SSH_HOST=codex-keen-dusk-76f6 no
 recent logs. Deploy updates with `docker compose up -d --build`; restarting
 the app ends all calls. No recordings or persistent room data exist.
 
-This initial setup has no TURN relay. Direct UDP calls may fail on restrictive
-networks; TURN and cross-network testing remain required before wider use.
+## TURN
+
+Existing installations: run `sh deploy/enable-turn.sh` once before updating.
+This adds a random TURN secret without changing the token signing secret.
+Open TCP/UDP 3478 and UDP 49160–49200, then rebuild with Compose. Updating
+the app interrupts active calls.
+
+Authenticated `/config` responses include 24-hour HMAC TURN credentials tied
+to the token identity. The shared secret is never sent to the browser. The
+server's own ICE configuration is unchanged: only browsers need the relay.
+Credentials are bearer grants, not revocable or room-scoped; renew by rejoining
+with a fresh admission token before 24 hours. Automatic renewal is not implemented.
+
+Coturn accepts UDP and TCP client transports on port 3478 and relays only to
+the Droplet's public IP. Other IPv4/IPv6 peers (including private/metadata IPs)
+are denied. Allocation limits are 4 per TURN user and 40 total; bandwidth is
+capped at 256,000 bytes/s per allocation and 5,120,000 bytes/s aggregate in
+each direction. These are safety limits, not measured capacity. WebRTC media
+remains DTLS-SRTP encrypted. TURN TLS/443 is not configured, so networks allowing
+only HTTPS traffic can still fail; do not claim universal connectivity.
+
+Verify both relay transports from an external client:
+
+```sh
+BASE_URL=https://webrtc.efrenfuentes.net DEPLOY_SSH_HOST=codex-keen-dusk-76f6 TURN_TRANSPORT=udp node test/browser/deployed-smoke.mjs
+BASE_URL=https://webrtc.efrenfuentes.net DEPLOY_SSH_HOST=codex-keen-dusk-76f6 TURN_TRANSPORT=tcp node test/browser/deployed-smoke.mjs
+```
+
+These tests force relay-only ICE, verify the selected candidate and transport,
+and require decoded audio in both directions. Omit TURN_TRANSPORT for the
+normal connection test. Use additional real networks before wider use.
+
 No load testing has been performed. Account authentication, token revocation,
 and network abuse protection remain incomplete. Monitor CPU, memory, bandwidth,
 and DigitalOcean billing. Stopping the server does not stop Droplet billing;

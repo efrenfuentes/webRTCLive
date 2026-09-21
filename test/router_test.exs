@@ -25,6 +25,38 @@ defmodule WebRTCLive.RouterTest do
     assert call(conn(:post, "/dev/token")).status == 404
   end
 
+  test "authenticated config includes temporary TURN credentials without the shared secret" do
+    old = Application.get_env(:webrtc_live, :turn)
+
+    on_exit(fn ->
+      if old,
+        do: Application.put_env(:webrtc_live, :turn, old),
+        else: Application.delete_env(:webrtc_live, :turn)
+    end)
+
+    secret = String.duplicate("private-turn-secret", 3)
+
+    Application.put_env(:webrtc_live, :turn, %{
+      secret: secret,
+      urls: ["turn:example.test:3478"],
+      ttl: 86400
+    })
+
+    assert call(conn(:get, "/config")).status == 401
+    {:ok, token} = WebRTCLive.Access.issue("demo", "alice", "participant")
+
+    response =
+      conn(:get, "/config") |> put_req_header("authorization", "Bearer #{token}") |> call()
+
+    assert response.status == 200
+    refute response.resp_body =~ secret
+    grant = Jason.decode!(response.resp_body)["iceServers"] |> List.last()
+    assert String.ends_with?(grant["username"], ":alice")
+
+    assert grant["credential"] ==
+             Base.encode64(:crypto.mac(:hmac, :sha, secret, grant["username"]))
+  end
+
   test "demo issuer validates grants when explicitly enabled" do
     Application.put_env(:webrtc_live, :demo_tokens, true)
     on_exit(fn -> Application.put_env(:webrtc_live, :demo_tokens, false) end)

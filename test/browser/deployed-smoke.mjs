@@ -5,6 +5,8 @@ import { chromium } from "playwright";
 
 const baseURL = process.env.BASE_URL;
 const sshHost = process.env.DEPLOY_SSH_HOST;
+const relayTransport = process.env.TURN_TRANSPORT;
+assert.ok(!relayTransport || ["udp", "tcp"].includes(relayTransport), "TURN_TRANSPORT must be udp or tcp");
 assert.ok(baseURL?.startsWith("https://"), "Set BASE_URL to the deployed HTTPS origin");
 assert.match(sshHost || "", /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, "Set DEPLOY_SSH_HOST");
 const room = `smoke-${Date.now()}`;
@@ -21,12 +23,23 @@ try {
       `cd /opt/webrtc-live && docker compose exec -T app bin/webrtc_live rpc 'WebRTCLive.Access.issue("${room}", "${identity}", "participant") |> elem(1) |> IO.puts()'`,
     ], { encoding: "utf8", timeout: 30000 }).trim();
     const context = await browser.newContext({ permissions: ["microphone"] });
-    await context.addInitScript(() => {
+    await context.addInitScript((transport) => {
       const Native = window.RTCPeerConnection;
       window.RTCPeerConnection = class extends Native {
-        constructor(...args) { super(...args); window.smokePeer = this; }
+        constructor(configuration) {
+          if (transport) {
+            configuration.iceTransportPolicy = "relay";
+            configuration.iceServers = configuration.iceServers.map(server => ({
+              ...server,
+              urls: (Array.isArray(server.urls) ? server.urls : [server.urls])
+                .filter(url => url.startsWith("turn:") && url.endsWith(`transport=${transport}`)),
+            })).filter(server => server.urls.length);
+          }
+          super(configuration);
+          window.smokePeer = this;
+        }
       };
-    });
+    }, relayTransport);
     const page = await context.newPage();
     await page.goto(baseURL);
     assert.equal((await page.request.get(`${baseURL}/health`)).status(), 200);
@@ -49,8 +62,20 @@ try {
       await setTimeout(200);
     }
     assert.ok(decoded, "Each client must receive and decode remote audio");
+    if (relayTransport) {
+      const candidate = await page.evaluate(async () => {
+        const stats = await window.smokePeer.getStats();
+        const transport = [...stats.values()].find(s => s.type === "transport" && s.selectedCandidatePairId);
+        const pair = stats.get(transport?.selectedCandidatePairId);
+        const local = stats.get(pair?.localCandidateId);
+        return { type: local?.candidateType, protocol: local?.relayProtocol };
+      });
+      assert.equal(candidate.type, "relay", "Selected connection must actually use TURN");
+      assert.equal(candidate.protocol, relayTransport, "Selected relay must use the requested transport");
+    }
   }
   console.log("PASS: trusted HTTPS, protected endpoints, and two-way decoded audio through the deployed server.");
+  if (relayTransport) console.log(`PASS: both clients use TURN over ${relayTransport.toUpperCase()}.`);
 } finally {
   await browser.close();
 }
