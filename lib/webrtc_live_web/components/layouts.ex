@@ -15,11 +15,33 @@ defmodule WebRTCLiveWeb.Layouts do
         <meta name="referrer" content="no-referrer" />
         <title>WebRTCLive</title>
         <style>
-          body { font: 16px system-ui; max-width: 760px; margin: 3rem auto; padding: 0 1rem; color: #182235; background: #f5f7fb; }
+          :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #101619; color: #edf5f3; }
+          * { box-sizing: border-box; }
+          body { max-width: 760px; margin: 6vh auto; padding: 24px; }
           nav { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-          input, select, button { font: inherit; padding: .7rem; margin: .4rem 0 1rem; border: 1px solid #aab5c4; border-radius: 6px; }
-          label { display: block; } button { cursor: pointer; background: #163965; color: white; }
-          form { margin: 1rem 0; } [role=alert] { color: #9a1727; } a { color: #164d91; }
+          nav span { overflow-wrap: anywhere; min-width: 0; }
+          h1 { font-size: clamp(32px, 7vw, 48px); line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
+          p { color: #b7c7c2; }
+          input, select, button { font: inherit; padding: 10px 14px; border: 1px solid #53645e; border-radius: 8px; background: #1c2924; color: inherit; max-width: 100%; }
+          input:not([type=hidden]), select { width: 100%; }
+          label { display: block; } button { cursor: pointer; background: #8fe5cb; color: #11251d; font-weight: 700; }
+          button[type=button], nav button { background: #1c2924; color: #edf5f3; }
+          button:disabled { opacity: .4; cursor: default; }
+          :focus-visible { outline: 2px solid #75dcc3; outline-offset: 3px; }
+          form { margin: 1rem 0; padding: 24px; border: 1px solid #35433f; border-radius: 16px; display: grid; gap: 14px; }
+          nav form { padding: 0; border: 0; margin: 0; }
+          [role=alert] { color: #ffb4ab; } a { color: #75dcc3; }
+          [role=status], #status { color: #8fe5cb; overflow-wrap: anywhere; }
+          audio { width: 100%; margin: 10px 0; }
+          small { color: #a4b7af; }
+          #participants { display: grid; gap: 12px; margin-bottom: 20px; }
+          #participants section, .room-card { border: 1px solid #35433f; border-radius: 12px; padding: 16px; }
+          #participants strong, #participants small { display: block; }
+          .room-list { list-style: none; padding: 0; display: grid; gap: 12px; }
+          .room-card { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+          .room-card a { overflow-wrap: anywhere; }
+          .danger { color: #ffb4ab; }
+          button.danger { background: #4b2426; border-color: #a66668; }
         </style>
       </head>
       <body>

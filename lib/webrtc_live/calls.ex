@@ -69,6 +69,39 @@ defmodule WebRTCLive.Calls do
     end)
   end
 
+  def delete(owner, slug, room_id) do
+    Repo.transaction(fn ->
+      room =
+        Repo.one(
+          from(r in Room, where: r.slug == ^slug and r.owner_id == ^owner.id, lock: "FOR UPDATE")
+        )
+
+      cond do
+        is_nil(room) -> Repo.rollback(:forbidden)
+        to_string(room.id) != to_string(room_id) -> Repo.rollback(:stale_room)
+        Registry.lookup(WebRTCLive.Registry, slug) != [] -> Repo.rollback(:room_active)
+        true -> Repo.delete!(room)
+      end
+    end)
+  end
+
+  # Serialize authenticated joins with deletion: after this lock is released,
+  # an admitted room is registered and deletion will reject it as active.
+  def with_join_lock(%{session_id: _, room_id: room_id}, fun) do
+    case Repo.transaction(fn ->
+           if Repo.one(from(r in Room, where: r.id == ^room_id, lock: "FOR SHARE")) do
+             fun.()
+           else
+             {:error, %{reason: :unauthorized}}
+           end
+         end) do
+      {:ok, result} -> result
+      {:error, _} -> {:error, %{reason: :unauthorized}}
+    end
+  end
+
+  def with_join_lock(_service_claims, fun), do: fun.()
+
   def invite(owner, slug, email, role) when role in ~w(participant publisher listener) do
     case access(owner, slug) do
       {%Room{owner_id: owner_id} = room, _} when owner_id == owner.id ->

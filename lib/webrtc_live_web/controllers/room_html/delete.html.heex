@@ -1,0 +1,10 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <h1>Delete {@room.slug}?</h1>
+  <p>This permanently removes the room and everyone's access to it. User accounts are kept. This cannot be undone.</p>
+  <p>Everyone must leave the call before you can delete this room.</p>
+  <.form for={%{}} action={~p"/rooms/#{@room.slug}"} method="delete">
+    <input type="hidden" name="room_id" value={@room.id} />
+    <button class="danger">Permanently delete room</button>
+    <a href={~p"/rooms/#{@room.slug}"}>Cancel</a>
+  </.form>
+</Layouts.app>

@@ -8,7 +8,9 @@ defmodule WebRTCLive.RoomChannel do
     with true <- WebRTCLive.Access.valid_name?(name),
          {:ok, claims} <- WebRTCLive.Access.authorize(socket.assigns[:token], name, role),
          :ok <- WebRTCLive.Admission.acquire() do
-      case join_authorized(name, role, claims.identity, socket) do
+      case WebRTCLive.Calls.with_join_lock(claims, fn ->
+             join_authorized(name, role, claims.identity, socket)
+           end) do
         {:ok, _, _} = result ->
           result
 

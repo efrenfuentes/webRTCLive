@@ -10,10 +10,11 @@ defmodule WebRTCLive.Access do
              context: "session"
            ),
          {user, _} <- WebRTCLive.Accounts.get_user_by_session_token(session_token),
-         {_, ^role} <- WebRTCLive.Calls.access(user, room) do
+         {%{id: room_id}, ^role} <- WebRTCLive.Calls.access(user, room) do
       {:ok,
        Phoenix.Token.sign(WebRTCLive.Endpoint, @salt, %{
          room: room,
+         room_id: room_id,
          identity: "u#{user_id}",
          role: role,
          session_id: session_id
@@ -52,12 +53,12 @@ defmodule WebRTCLive.Access do
 
   def verify(_), do: {:error, :unauthorized}
 
-  defp session_valid?(%{session_id: id, room: room, role: role, identity: identity}) do
+  defp session_valid?(%{session_id: id, room: room, role: role, identity: identity} = claims) do
     with %{token: token, context: "session"} <-
            WebRTCLive.Repo.get(WebRTCLive.Accounts.UserToken, id),
          {user, _} <- WebRTCLive.Accounts.get_user_by_session_token(token),
-         {_, ^role} <- WebRTCLive.Calls.access(user, room) do
-      identity == "u#{user.id}"
+         {%{id: room_id}, ^role} <- WebRTCLive.Calls.access(user, room) do
+      identity == "u#{user.id}" and claims[:room_id] == room_id
     else
       _ -> false
     end

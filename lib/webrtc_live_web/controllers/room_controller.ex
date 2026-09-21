@@ -31,15 +31,54 @@ defmodule WebRTCLiveWeb.RoomController do
   def join(conn, %{"slug" => slug}) do
     case Calls.access(conn.assigns.current_scope.user, slug) do
       {room, role} ->
-        {:ok, token} =
-          WebRTCLive.Access.issue_for_session(room.slug, role, get_session(conn, :user_token))
+        case WebRTCLive.Access.issue_for_session(room.slug, role, get_session(conn, :user_token)) do
+          {:ok, token} ->
+            conn
+            |> put_resp_header("cache-control", "no-store")
+            |> json(%{token: token, role: role})
 
-        conn |> put_resp_header("cache-control", "no-store") |> json(%{token: token, role: role})
+          {:error, _} ->
+            conn |> put_status(403) |> json(%{error: "forbidden"})
+        end
 
       nil ->
         conn |> put_status(403) |> json(%{error: "forbidden"})
     end
   end
+
+  def confirm_delete(conn, %{"slug" => slug}) do
+    user = conn.assigns.current_scope.user
+
+    case Calls.access(user, slug) do
+      {%{owner_id: owner_id} = room, _} when owner_id == user.id ->
+        render(conn, :delete, room: room)
+
+      _ ->
+        send_resp(conn, 404, "Room not found")
+    end
+  end
+
+  def delete(conn, %{"slug" => slug, "room_id" => room_id}) when is_binary(room_id) do
+    case Calls.delete(conn.assigns.current_scope.user, slug, room_id) do
+      {:ok, _} ->
+        conn |> put_flash(:info, "Room deleted.") |> redirect(to: ~p"/")
+
+      {:error, :room_active} ->
+        conn
+        |> put_flash(:error, "This room is active. Ask everyone to leave, then try again.")
+        |> redirect(to: ~p"/rooms/#{slug}")
+
+      {:error, :stale_room} ->
+        conn
+        |> put_flash(:error, "This room has changed. Review it before deleting.")
+        |> redirect(to: ~p"/")
+
+      {:error, _} ->
+        send_resp(conn, 404, "Room not found")
+    end
+  end
+
+  def delete(conn, _), do: send_resp(conn, 400, "Room confirmation is required")
 
   def invite(conn, %{"slug" => slug, "email" => email, "role" => role}) do
     result =

@@ -22,5 +22,6 @@
       </select><button>Send invitation</button>
     </.form>
   </section>
+  <p :if={@room.owner_id == @current_scope.user.id}><a class="danger" href={~p"/rooms/#{@room.slug}/delete"}>Delete room</a></p>
   <script type="module" src="/client.js"></script>
 </Layouts.app>

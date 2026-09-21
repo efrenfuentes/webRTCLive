@@ -66,16 +66,40 @@ try {
     const missingCSRF = await page.request.post(`${baseURL}/rooms/${slug}/join`);
     assert.equal(missingCSRF.status(), 403);
   }
+  assert.equal(await pages[1].getByRole("link", { name: "Delete room", exact: true }).count(), 0);
+  const manage = await pages[0].context().newPage();
+  await manage.goto(`${baseURL}/rooms/${slug}/delete`);
+  await manage.getByRole("button", { name: "Permanently delete room", exact: true }).click();
+  await manage.waitForURL(`${baseURL}/rooms/${slug}`);
+  assert.match(await manage.getByRole("alert").textContent(), /room is active/);
+  await manage.goto(baseURL);
+  assert.equal(await manage.evaluate(() => getComputedStyle(document.documentElement).backgroundColor), "rgb(16, 22, 25)");
+  await manage.locator("#slug").fill(`${slug}-delete`);
+  await manage.getByRole("button", { name: "Create room", exact: true }).click();
+  await manage.waitForURL(`${baseURL}/rooms/${slug}-delete`);
+  await manage.getByRole("link", { name: "Delete room", exact: true }).click();
+  await manage.getByRole("link", { name: "Cancel", exact: true }).click();
+  await manage.waitForURL(`${baseURL}/rooms/${slug}-delete`);
+  await manage.setViewportSize({ width: 375, height: 812 });
+  assert.ok(await manage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Room layout must fit mobile screens");
+  if (process.env.SCREENSHOT_PATH) await manage.screenshot({ path: process.env.SCREENSHOT_PATH, fullPage: true });
+  await manage.getByRole("link", { name: "Delete room", exact: true }).click();
+  await manage.getByRole("button", { name: "Permanently delete room", exact: true }).click();
+  await manage.waitForURL(`${baseURL}/`);
+  assert.equal(await manage.getByRole("link", { name: `${slug}-delete`, exact: true }).count(), 0);
+  assert.equal((await manage.request.get(`${baseURL}/rooms/${slug}-delete`)).status(), 404);
+  await manage.close();
   await pages[0].getByRole("button", { name: "Log out", exact: true }).click();
   await pages[0].waitForURL(`${baseURL}/users/log-in`);
   await pages[1].waitForFunction(() => document.querySelector("#members").textContent.includes("1 / 4"));
   console.log("PASS: two magic-link logins, automatic room grants, bidirectional decoded audio, CSRF enforcement, and logout cleanup.");
+  console.log("PASS: original dark theme, mobile layout, owner-only confirmed deletion, cancellation, and active-room protection.");
 } finally {
   await browser.close();
   rpc(`
     import Ecto.Query
     alias WebRTCLive.{Repo, Calls, Accounts}
-    Repo.delete_all(from r in Calls.Room, where: r.slug == "${slug}")
+    Repo.delete_all(from r in Calls.Room, where: r.slug in ["${slug}", "${slug}-delete"])
     Repo.delete_all(from u in Accounts.User, where: u.email in ["${slug}-alice@example.invalid", "${slug}-bob@example.invalid"])
     IO.puts("Test accounts removed")
   `);

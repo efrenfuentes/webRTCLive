@@ -27,6 +27,8 @@ defmodule WebRTCLiveWeb.Router do
     post("/rooms", RoomController, :create)
     post("/rooms/:slug/invitations", RoomController, :invite)
     get("/rooms/:slug", RoomController, :show)
+    get("/rooms/:slug/delete", RoomController, :confirm_delete)
+    delete("/rooms/:slug", RoomController, :delete)
     post("/rooms/:slug/join", RoomController, :join)
     get("/users/settings", UserSettingsController, :edit)
     put("/users/settings", UserSettingsController, :update)

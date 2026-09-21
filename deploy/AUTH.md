@@ -5,6 +5,13 @@ transactional email. Sign-up is invitation-only. Every invited user can create
 rooms and invite people to rooms they own. The bootstrap administrator flag is
 reserved for future administration features; it does not bypass room membership.
 
+Owners can delete rooms from the room list or room page after a separate
+confirmation. Active rooms must be emptied first. Deletion removes memberships,
+not user accounts. Browser grants include the database room ID so old grants
+cannot become valid again when a room name is reused. Authenticated joins and
+deletion use database row locks to avoid deleting a room while a join is admitted.
+Trusted service tokens remain an administrator-controlled diagnostic capability.
+
 Set `POSTGRES_PASSWORD`, `DATABASE_URL`, and `BREVO_API_KEY` in the server's
 private `.env` (mode 0600). Never commit real values. The verified Brevo sender
 must be `developer@efrenfuentes.net`. Keep link tracking disabled for login emails.
