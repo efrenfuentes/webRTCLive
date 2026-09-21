@@ -4,7 +4,8 @@ const $ = (id) => document.getElementById(id);
 const room = new Room();
 let attempt = null;
 let muted = false;
-$("identity").value = `guest-${crypto.randomUUID().slice(0, 8)}`;
+const authenticated = $("join-form").dataset.authenticated === "true";
+if (!authenticated) $("identity").value = `guest-${crypto.randomUUID().slice(0, 8)}`;
 
 function controls(joined) {
   for (const id of ["join", "room", "identity", "role", "token"]) $(id).disabled = joined;
@@ -64,9 +65,15 @@ $("join-form").addEventListener("submit", async (event) => {
   $("mute").disabled = true;
   $("status").textContent = "Joining room…";
   try {
-    const role = $("role").value;
+    let role = $("role").value;
     let token = $("token").value.trim();
-    if (!token) {
+    if (authenticated) {
+      const response = await fetch(`/rooms/${encodeURIComponent($("room").value)}/join`, {
+        method: "POST", headers: { "x-csrf-token": $("join-form").dataset.csrf, "Accept": "application/json" },
+      });
+      if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("Please log in again or ask the room owner for access.");
+      ({ token, role } = await response.json());
+    } else if (!token) {
       const response = await fetch("/dev/token", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ room: $("room").value, identity: $("identity").value, role }),
@@ -98,3 +105,5 @@ $("mute").addEventListener("click", async () => {
   }
 });
 window.addEventListener("pagehide", () => room.leave());
+$("join").disabled = false;
+$("join-form").dataset.ready = "true";

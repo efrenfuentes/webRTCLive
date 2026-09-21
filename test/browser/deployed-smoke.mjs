@@ -41,7 +41,7 @@ try {
       };
     }, relayTransport);
     const page = await context.newPage();
-    await page.goto(baseURL);
+    await page.goto(new URL("/index.html", baseURL).href);
     assert.equal((await page.request.get(`${baseURL}/health`)).status(), 200);
     assert.equal((await page.request.post(`${baseURL}/dev/token`, { data: {} })).status(), 404);
     assert.equal((await page.request.get(`${baseURL}/config`)).status(), 401);

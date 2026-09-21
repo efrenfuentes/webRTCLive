@@ -4,6 +4,8 @@ defmodule WebRTCLive.Application do
   def start(_type, _args) do
     Supervisor.start_link(
       [
+        WebRTCLive.Repo,
+        WebRTCLive.RateLimit,
         {Phoenix.PubSub, name: WebRTCLive.PubSub},
         {Registry, keys: :unique, name: WebRTCLive.Registry},
         {WebRTCLive.Admission, limit: Application.fetch_env!(:webrtc_live, :max_sessions)},

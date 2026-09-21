@@ -1,0 +1,26 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <h1>{@room.slug}</h1>
+  <form id="join-form" data-authenticated="true" data-csrf={Plug.CSRFProtection.get_csrf_token()}>
+    <input id="room" type="hidden" value={@room.slug} />
+    <input id="identity" type="hidden" value={"u#{@current_scope.user.id}"} />
+    <input id="token" type="hidden" value="" />
+    <input id="role" type="hidden" value={@role} />
+    <p>Access: {Map.fetch!(%{"participant" => "Talk and listen", "publisher" => "Publish only", "listener" => "Listen only"}, @role)}</p>
+    <button id="join" disabled>Join room</button>
+    <button id="leave" type="button" disabled>Leave</button>
+    <button id="mute" type="button" disabled>Mute microphone</button>
+  </form>
+  <p id="status" role="status">Ready to join</p>
+  <p id="members">Room is not connected.</p><div id="participants"></div>
+  <section :if={@room.owner_id == @current_scope.user.id}>
+    <h2>Invite to this room</h2>
+    <.form for={%{}} action={~p"/rooms/#{@room.slug}/invitations"}>
+      <label for="email">Email</label><input type="email" id="email" name="email" required />
+      <label for="invite-role">Permission</label>
+      <select id="invite-role" name="role">
+        <option value="participant">Talk and listen</option><option value="publisher">Publish only</option><option value="listener">Listen only</option>
+      </select><button>Send invitation</button>
+    </.form>
+  </section>
+  <script type="module" src="/client.js"></script>
+</Layouts.app>

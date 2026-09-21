@@ -33,7 +33,7 @@ try {
   page.on("console", message => {
     if (message.text().startsWith("LOAD ")) console.log(message.text());
   });
-  await page.goto(baseURL);
+  await page.goto(new URL("/index.html", baseURL).href);
   await page.evaluate(async ({grants, transport}) => {
     const {Room} = await import("/sdk.js");
     const Native = window.RTCPeerConnection;

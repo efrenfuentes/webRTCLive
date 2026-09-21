@@ -3,6 +3,14 @@ import Config
 if config_env() == :prod do
   host = System.fetch_env!("HOST")
 
+  config :webrtc_live, WebRTCLive.Repo,
+    url: System.fetch_env!("DATABASE_URL"),
+    pool_size: 5
+
+  config :webrtc_live, WebRTCLive.Mailer,
+    adapter: Swoosh.Adapters.Brevo,
+    api_key: System.fetch_env!("BREVO_API_KEY")
+
   config :webrtc_live, WebRTCLive.Endpoint,
     secret_key_base: System.fetch_env!("SECRET_KEY_BASE"),
     url: [host: host, scheme: "https", port: 443],

@@ -3,6 +3,26 @@ defmodule WebRTCLive.Access do
   @salt "room-access-v1"
   @max_age 300
 
+  def issue_for_session(room, role, session_token) do
+    with %{id: session_id, user_id: user_id} <-
+           WebRTCLive.Repo.get_by(WebRTCLive.Accounts.UserToken,
+             token: session_token,
+             context: "session"
+           ),
+         {user, _} <- WebRTCLive.Accounts.get_user_by_session_token(session_token),
+         {_, ^role} <- WebRTCLive.Calls.access(user, room) do
+      {:ok,
+       Phoenix.Token.sign(WebRTCLive.Endpoint, @salt, %{
+         room: room,
+         identity: "u#{user_id}",
+         role: role,
+         session_id: session_id
+       })}
+    else
+      _ -> {:error, :unauthorized}
+    end
+  end
+
   def issue(room, identity, role) do
     if valid_name?(room) and valid_name?(identity) and
          role in ["publisher", "listener", "participant"] do
@@ -22,7 +42,8 @@ defmodule WebRTCLive.Access do
            Phoenix.Token.verify(WebRTCLive.Endpoint, @salt, token, max_age: @max_age),
          true <-
            valid_name?(room) and valid_name?(identity) and
-             role in ["publisher", "listener", "participant"] do
+             role in ["publisher", "listener", "participant"],
+         true <- session_valid?(claims) do
       {:ok, claims}
     else
       _ -> {:error, :unauthorized}
@@ -30,6 +51,20 @@ defmodule WebRTCLive.Access do
   end
 
   def verify(_), do: {:error, :unauthorized}
+
+  defp session_valid?(%{session_id: id, room: room, role: role, identity: identity}) do
+    with %{token: token, context: "session"} <-
+           WebRTCLive.Repo.get(WebRTCLive.Accounts.UserToken, id),
+         {user, _} <- WebRTCLive.Accounts.get_user_by_session_token(token),
+         {_, ^role} <- WebRTCLive.Calls.access(user, room) do
+      identity == "u#{user.id}"
+    else
+      _ -> false
+    end
+  end
+
+  # Trusted server-side issuers retain the explicit service/SDK token API.
+  defp session_valid?(_), do: true
 
   def authorize(token, room, role) do
     case verify(token) do

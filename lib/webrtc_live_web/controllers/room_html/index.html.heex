@@ -1,0 +1,10 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <h1>Your rooms</h1>
+  <p :if={@rooms == []}>No rooms yet. Create one or ask a room owner for an invitation.</p>
+  <ul><li :for={{room, role} <- @rooms}><a href={~p"/rooms/#{room.slug}"}>{room.slug}</a> — {role}</li></ul>
+  <h2>Create a room</h2>
+  <.form for={%{}} action={~p"/rooms"}>
+    <label for="slug">Room name</label><input id="slug" name="slug" required pattern="[a-zA-Z0-9_-]{1,64}" maxlength="64" />
+    <button>Create room</button>
+  </.form>
+</Layouts.app>

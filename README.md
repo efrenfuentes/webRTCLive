@@ -9,10 +9,17 @@ It is not LiveKit-protocol compatible.
 ```sh
 mise install
 mix deps.get
+mix ecto.create
+mix ecto.migrate
 mix phx.server
 ```
 
-Open <http://localhost:4000> in two to four browsers or tabs. Join as **Talk and listen**
+PostgreSQL is required (default `postgres/postgres` on loopback port 5433;
+override with `DATABASE_URL`). The home page now requires an invited account.
+See [authentication setup and operations](deploy/AUTH.md) for bootstrap, email,
+database backups, and authenticated browser tests.
+
+For the local diagnostic demo, open <http://localhost:4000/index.html> in two to four browsers or tabs. Join as **Talk and listen**
 using the same room name and distinct identities. Allow microphone access and use
 headphones. If autoplay is blocked, use each participant's audio player. Mute state
 is visible to everyone. **Publish only** and **Listen only** remain available for
@@ -76,6 +83,8 @@ ordered audio transceivers; old single-track relay clients must update.
 
 ```sh
 mix format --check-formatted
+MIX_ENV=test mix ecto.create
+MIX_ENV=test mix ecto.migrate
 mix test
 ```
 
@@ -99,12 +108,16 @@ All WebSocket connections require a signed access token. A grant contains a room
 participant identity, and role (`participant`, `publisher`, or `listener`). The signature and
 five-minute lifetime are checked on connect and again on room join. Expiry limits
 admission, not the duration of an established call. Tokens are bearer credentials
-and can be reused within that window; they are not single-use or revocable yet.
+and can be reused within that window. Browser-issued grants are bound to a database
+login session and room membership; logout revokes them and disconnects that session.
+Explicit server-issued service grants are not session-bound or individually revocable.
 An identity can have only one active session in a room. `participant` can publish
 and subscribe; `publisher` can only publish; `listener` can only subscribe.
 
-These are Phoenix signed tokens, **not JWTs or LiveKit-compatible tokens**. Issue
-them from trusted Elixir application code after authenticating your own users:
+The authenticated room UI issues grants automatically, using server-side identity
+and permissions. Room owners invite users with a speaking/listening role.
+These are Phoenix signed tokens, **not JWTs or LiveKit-compatible tokens**. For
+trusted service integrations, grants can still be issued from Elixir code:
 
 ```elixir
 {:ok, token} = WebRTCLive.Access.issue("demo", "alice", "participant")

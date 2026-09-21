@@ -24,7 +24,7 @@ async function page(identity, room, role = "participant") {
   });
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(baseURL);
+  await page.goto(new URL("/index.html", baseURL).href);
   await page.locator("#identity").fill(identity);
   await page.locator("#room").fill(room);
   await page.locator("#role").selectOption(role);

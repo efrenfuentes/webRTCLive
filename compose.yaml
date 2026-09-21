@@ -4,6 +4,9 @@ services:
     restart: unless-stopped
     network_mode: host
     env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       RELEASE_DISTRIBUTION: name
       RELEASE_NODE: webrtc_live@127.0.0.1
@@ -12,6 +15,24 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: webrtc_live
+      POSTGRES_USER: webrtc_live
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webrtc_live -d webrtc_live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     logging:
       options:
         max-size: 10m
@@ -52,5 +73,6 @@ services:
         max-size: 10m
         max-file: '3'
 volumes:
+  postgres_data:
   caddy_data:
   caddy_config:

@@ -12,8 +12,9 @@ limits are five rooms and twenty sessions; these are not measured capacity.
 4. Run `sh deploy/init-env.sh`, then set the hostname and public IPv4 address
    in `.env`. This generates separate signing and TURN secrets. Keep `.env`
    private (`chmod 600 .env`) and never commit it.
-5. Run `docker compose up -d --build`. Linux host networking allows ICE to
-   advertise the server's real public address. HTTP binds only to loopback.
+5. Configure Brevo and PostgreSQL, then follow the build/migrate/start sequence
+   in [AUTH.md](AUTH.md). Linux host networking allows ICE to advertise the
+   server's real public address. HTTP and PostgreSQL bind only to loopback.
 6. Verify `curl https://YOUR_HOST/health` returns `ok`, and `/dev/token`
    rejects token requests. Caddy obtains and renews trusted certificates;
    retain its Docker volumes across updates.
@@ -26,7 +27,7 @@ Generate a grant over SSH from `/opt/webrtc-live`:
 docker compose exec -T app bin/webrtc_live rpc 'WebRTCLive.Access.issue("demo", "alice", "participant") |> elem(1) |> IO.puts()'
 ```
 
-Open the HTTPS site, select room `demo`, role **Talk and listen** (`participant`), and paste the
+Open `/index.html` on the HTTPS site, select room `demo`, role **Talk and listen** (`participant`), and paste the
 token. Generate another token with identity `bob` for the other client.
 Join within five minutes of issuance. Never share the server secret.
 
@@ -40,8 +41,9 @@ BASE_URL=https://webrtc.efrenfuentes.net DEPLOY_SSH_HOST=codex-keen-dusk-76f6 no
 ## Operations and limits
 
 `docker compose ps` shows services, `docker compose logs --tail=100` shows
-recent logs. Deploy updates with `docker compose up -d --build`; restarting
-the app ends all calls. No recordings or persistent room data exist.
+recent logs. Follow [AUTH.md](AUTH.md) to deploy updates and migrations; restarting
+the app ends all calls. Accounts, sessions, and room permissions are persistent.
+There are no recordings. Back up the database and never remove its Docker volume.
 
 ## TURN
 
@@ -79,7 +81,8 @@ Initial short load tests passed at five four-person rooms over direct audio
 and TURN UDP/TCP. Ten direct rooms hit the server/generator CPU safety stop;
 the production limit remains five rooms. See the
 [results and limitations](../test/browser/LOAD_RESULTS_2026-09-21.md).
-Long-duration capacity validation remains. Account authentication, token revocation,
-and network abuse protection remain incomplete. Monitor CPU, memory, bandwidth,
+Long-duration capacity validation remains. Invite-only account authentication and
+session-bound browser grants are implemented; service grants and TURN credentials
+remain bearer capabilities. Network abuse protection remains incomplete. Monitor CPU, memory, bandwidth,
 and DigitalOcean billing. Stopping the server does not stop Droplet billing;
 delete it when no longer needed. Transfer overages may add to the base price.
